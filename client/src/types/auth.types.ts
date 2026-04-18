@@ -15,6 +15,11 @@ export interface LoginRequest {
   email: string;
 }
 
+export interface LoginWithPasswordRequest {
+  email: string;
+  password: string;
+}
+
 export interface VerifyOTPRequest {
   email: string;
   otp: string;

@@ -2,12 +2,6 @@ import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import User from '../models/User';
-import { sendOTPEmail, sendWelcomeEmail } from '../services/emailService';
-
-// Generate OTP
-const generateOTP = () => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-};
 
 // Generate JWT Token
 const generateToken = (userId: string, email: string, role: string) => {
@@ -18,51 +12,54 @@ const generateToken = (userId: string, email: string, role: string) => {
   );
 };
 
-// Register new user (Admin only)
-export const register = async (req: Request, res: Response) => {
+// For development - Login with password (no OTP)
+export const loginWithPassword = async (req: Request, res: Response) => {
   try {
-    const { username, email, password, fullName, role, department, phoneNumber } = req.body;
+    const { email, password } = req.body;
 
-    // Check if user exists
-    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
-    if (existingUser) {
-      return res.status(400).json({ message: 'User already exists with this email or username' });
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found with this email' });
     }
 
-    // Create new user
-    const user = new User({
-      username,
-      email,
-      password,
-      fullName,
-      role: role || 'viewer',
-      department,
-      phoneNumber,
-      isActive: true,
-      isEmailVerified: false
-    });
+    if (!user.isActive) {
+      return res.status(403).json({ message: 'Account is deactivated. Contact administrator.' });
+    }
 
+    // Check password
+    const isValid = await user.comparePassword(password);
+    if (!isValid) {
+      return res.status(401).json({ message: 'Invalid password' });
+    }
+
+    // Update last login
+    user.lastLogin = new Date();
     await user.save();
 
-    // Send welcome email
-    await sendWelcomeEmail(email, fullName);
+    // Generate token
+    const token = generateToken(user._id.toString(), user.email, user.role);
 
-    res.status(201).json({
-      message: 'User registered successfully',
+    res.json({
+      message: 'Login successful',
+      token,
       user: {
         id: user._id,
         username: user.username,
         email: user.email,
         fullName: user.fullName,
-        role: user.role
+        role: user.role,
+        department: user.department,
+        phoneNumber: user.phoneNumber,
+        profilePicture: user.profilePicture
       }
     });
   } catch (error: any) {
+    console.error('Login error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Request OTP for login
+// Request OTP for login (simplified - just returns OTP in console)
 export const requestOTP = async (req: Request, res: Response) => {
   try {
     const { email } = req.body;
@@ -77,18 +74,29 @@ export const requestOTP = async (req: Request, res: Response) => {
     }
 
     // Generate OTP
-    const otp = generateOTP();
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
     user.otpCode = otp;
     user.otpExpires = otpExpires;
     await user.save();
 
-    // Send OTP email
-    await sendOTPEmail(email, otp, user.fullName);
+    // For development, log OTP to console
+    console.log(`=================================`);
+    console.log(`🔐 OTP for ${email}: ${otp}`);
+    console.log(`⏰ Valid for 10 minutes`);
+    console.log(`=================================`);
 
-    res.json({ message: 'OTP sent to your email address' });
+    // In production, uncomment this to send real email
+    // await sendOTPEmail(email, otp, user.fullName);
+
+    res.json({ 
+      message: 'OTP sent successfully',
+      // For development only - remove in production
+      dev_otp: otp 
+    });
   } catch (error: any) {
+    console.error('Request OTP error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -137,6 +145,49 @@ export const verifyOTPAndLogin = async (req: Request, res: Response) => {
       }
     });
   } catch (error: any) {
+    console.error('Verify OTP error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Register new user (Admin only)
+export const register = async (req: Request, res: Response) => {
+  try {
+    const { username, email, password, fullName, role, department, phoneNumber } = req.body;
+
+    // Check if user exists
+    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
+    if (existingUser) {
+      return res.status(400).json({ message: 'User already exists with this email or username' });
+    }
+
+    // Create new user
+    const user = new User({
+      username,
+      email,
+      password,
+      fullName,
+      role: role || 'viewer',
+      department,
+      phoneNumber,
+      isActive: true,
+      isEmailVerified: true // Set to true for development
+    });
+
+    await user.save();
+
+    res.status(201).json({
+      message: 'User registered successfully',
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role
+      }
+    });
+  } catch (error: any) {
+    console.error('Register error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -150,6 +201,7 @@ export const getProfile = async (req: any, res: Response) => {
     }
     res.json(user);
   } catch (error: any) {
+    console.error('Get profile error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -167,6 +219,7 @@ export const updateProfile = async (req: any, res: Response) => {
 
     res.json({ message: 'Profile updated successfully', user });
   } catch (error: any) {
+    console.error('Update profile error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -193,6 +246,7 @@ export const changePassword = async (req: any, res: Response) => {
 
     res.json({ message: 'Password changed successfully' });
   } catch (error: any) {
+    console.error('Change password error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -203,6 +257,7 @@ export const getAllUsers = async (req: Request, res: Response) => {
     const users = await User.find().select('-password -otpCode -otpExpires');
     res.json(users);
   } catch (error: any) {
+    console.error('Get all users error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -225,6 +280,7 @@ export const updateUserRole = async (req: Request, res: Response) => {
 
     res.json({ message: 'User role updated successfully', user });
   } catch (error: any) {
+    console.error('Update user role error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -244,6 +300,7 @@ export const toggleUserStatus = async (req: Request, res: Response) => {
 
     res.json({ message: `User ${user.isActive ? 'activated' : 'deactivated'} successfully` });
   } catch (error: any) {
+    console.error('Toggle user status error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -256,6 +313,7 @@ export const deleteUser = async (req: Request, res: Response) => {
     await User.findByIdAndDelete(userId);
     res.json({ message: 'User deleted successfully' });
   } catch (error: any) {
+    console.error('Delete user error:', error);
     res.status(500).json({ message: error.message });
   }
 };

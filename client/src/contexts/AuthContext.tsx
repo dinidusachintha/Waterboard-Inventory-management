@@ -8,6 +8,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   login: (email: string) => Promise<void>;
+  loginWithPassword: (email: string, password: string) => Promise<void>;
   verifyOTP: (email: string, otp: string) => Promise<void>;
   logout: () => void;
   updateProfile: (data: Partial<User>) => Promise<void>;
@@ -46,8 +47,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string) => {
     try {
-      await api.post('/auth/request-otp', { email });
+      const response = await api.post('/auth/request-otp', { email });
       toast.success('OTP sent to your email!');
+      // For development, show OTP in console
+      if (response.data.dev_otp) {
+        console.log('Development OTP:', response.data.dev_otp);
+        toast.success(`Dev OTP: ${response.data.dev_otp}`);
+      }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Login failed');
+      throw error;
+    }
+  };
+
+  const loginWithPassword = async (email: string, password: string) => {
+    try {
+      const response = await api.post('/auth/login', { email, password });
+      const { token, user } = response.data;
+      
+      setToken(token);
+      setUser(user);
+      localStorage.setItem('auth_token', token);
+      localStorage.setItem('auth_user', JSON.stringify(user));
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      toast.success('Login successful!');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Login failed');
       throw error;
@@ -107,19 +131,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isAdmin = user?.role === 'admin';
   const isManager = user?.role === 'manager' || user?.role === 'admin';
 
+  const value: AuthContextType = {
+    user,
+    token,
+    isLoading,
+    login,
+    loginWithPassword,
+    verifyOTP,
+    logout,
+    updateProfile,
+    changePassword,
+    isAdmin,
+    isManager
+  };
+
   return (
-    <AuthContext.Provider value={{
-      user,
-      token,
-      isLoading,
-      login,
-      verifyOTP,
-      logout,
-      updateProfile,
-      changePassword,
-      isAdmin,
-      isManager
-    }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

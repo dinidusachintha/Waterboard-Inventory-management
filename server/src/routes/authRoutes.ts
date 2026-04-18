@@ -3,6 +3,7 @@ import {
   register,
   requestOTP,
   verifyOTPAndLogin,
+  loginWithPassword, // Add this
   getProfile,
   updateProfile,
   changePassword,
@@ -19,6 +20,7 @@ const router = express.Router();
 router.post('/register', authenticateToken, authorizeRoles('admin'), register);
 router.post('/request-otp', requestOTP);
 router.post('/verify-otp', verifyOTPAndLogin);
+router.post('/login', loginWithPassword); // Add password login route
 
 // Protected routes
 router.get('/profile', authenticateToken, getProfile);
