@@ -1,14 +1,27 @@
 import { Request, Response } from 'express';
 import Inventory from '../models/Inventory';
 
-// Get all inventory items with filters
-export const getAllInventory = async (req: Request, res: Response) => {
+// Get inventory based on user role and section
+export const getAllInventory = async (req: any, res: Response) => {
   try {
-    const { search, category, status, sectionId, page = 1, limit = 10 } = req.query;
+    const { search, category, status, page = 1, limit = 10 } = req.query;
+    const userRole = req.user.role;
+    const userSectionId = req.user.sectionId;
     
     let query: any = {};
     
-    // Apply filters
+    // Filter by section for non-admin users
+    if (userRole !== 'admin') {
+      if (!userSectionId) {
+        return res.status(403).json({ message: 'No section assigned to this user' });
+      }
+      query.sectionId = userSectionId;
+    } else if (req.query.sectionId) {
+      // Admin can filter by section
+      query.sectionId = req.query.sectionId;
+    }
+    
+    // Apply search filters
     if (search) {
       query.$or = [
         { itemName: { $regex: search, $options: 'i' } },
@@ -18,7 +31,6 @@ export const getAllInventory = async (req: Request, res: Response) => {
     
     if (category) query.category = category;
     if (status) query.status = status;
-    if (sectionId) query.sectionId = sectionId;
     
     const skip = (Number(page) - 1) * Number(limit);
     
@@ -37,25 +49,13 @@ export const getAllInventory = async (req: Request, res: Response) => {
       totalPages: Math.ceil(total / Number(limit))
     });
   } catch (error: any) {
+    console.error('Get inventory error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get inventory by ID
-export const getInventoryById = async (req: Request, res: Response) => {
-  try {
-    const item = await Inventory.findById(req.params.id).populate('sectionId', 'name code');
-    if (!item) {
-      return res.status(404).json({ message: 'Inventory item not found' });
-    }
-    res.json(item);
-  } catch (error: any) {
-    res.status(500).json({ message: error.message });
-  }
-};
-
-// Create new inventory item
-export const createInventory = async (req: Request, res: Response) => {
+// Create inventory item
+export const createInventory = async (req: any, res: Response) => {
   try {
     const {
       itemCode,
@@ -73,13 +73,18 @@ export const createInventory = async (req: Request, res: Response) => {
       notes
     } = req.body;
     
-    // Check if item code already exists
-    const existingItem = await Inventory.findOne({ itemCode });
-    if (existingItem) {
-      return res.status(400).json({ message: 'Item code already exists' });
+    // Check if user has permission to add to this section
+    if (req.user.role !== 'admin' && req.user.sectionId !== sectionId) {
+      return res.status(403).json({ message: 'You can only add items to your assigned section' });
     }
     
-    // Determine status based on quantity
+    // Check if item code already exists in the section
+    const existingItem = await Inventory.findOne({ itemCode, sectionId });
+    if (existingItem) {
+      return res.status(400).json({ message: 'Item code already exists in this section' });
+    }
+    
+    // Determine status
     let status = 'in-stock';
     if (quantity <= 0) {
       status = 'out-of-stock';
@@ -107,74 +112,102 @@ export const createInventory = async (req: Request, res: Response) => {
     await inventory.save();
     res.status(201).json(inventory);
   } catch (error: any) {
+    console.error('Create inventory error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
 // Update inventory item
-export const updateInventory = async (req: Request, res: Response) => {
+export const updateInventory = async (req: any, res: Response) => {
   try {
+    const inventory = await Inventory.findById(req.params.id);
+    
+    if (!inventory) {
+      return res.status(404).json({ message: 'Inventory item not found' });
+    }
+    
+    // Check permission
+    if (req.user.role !== 'admin' && req.user.sectionId !== inventory.sectionId.toString()) {
+      return res.status(403).json({ message: 'You can only update items in your assigned section' });
+    }
+    
     const updateData = { ...req.body };
     
-    // Recalculate status if quantity or minimumStock changed
+    // Recalculate status
     if (updateData.quantity !== undefined || updateData.minimumStock !== undefined) {
-      const currentItem = await Inventory.findById(req.params.id);
-      if (currentItem) {
-        const newQuantity = updateData.quantity !== undefined ? updateData.quantity : currentItem.quantity;
-        const newMinStock = updateData.minimumStock !== undefined ? updateData.minimumStock : currentItem.minimumStock;
-        
-        if (newQuantity <= 0) {
-          updateData.status = 'out-of-stock';
-        } else if (newQuantity <= newMinStock) {
-          updateData.status = 'low-stock';
-        } else {
-          updateData.status = 'in-stock';
-        }
+      const newQuantity = updateData.quantity !== undefined ? updateData.quantity : inventory.quantity;
+      const newMinStock = updateData.minimumStock !== undefined ? updateData.minimumStock : inventory.minimumStock;
+      
+      if (newQuantity <= 0) {
+        updateData.status = 'out-of-stock';
+      } else if (newQuantity <= newMinStock) {
+        updateData.status = 'low-stock';
+      } else {
+        updateData.status = 'in-stock';
       }
     }
     
-    const inventory = await Inventory.findByIdAndUpdate(
+    const updatedInventory = await Inventory.findByIdAndUpdate(
       req.params.id,
       updateData,
       { new: true, runValidators: true }
     );
     
-    if (!inventory) {
-      return res.status(404).json({ message: 'Inventory item not found' });
-    }
-    
-    res.json(inventory);
+    res.json(updatedInventory);
   } catch (error: any) {
+    console.error('Update inventory error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
 // Delete inventory item
-export const deleteInventory = async (req: Request, res: Response) => {
+export const deleteInventory = async (req: any, res: Response) => {
   try {
-    const inventory = await Inventory.findByIdAndDelete(req.params.id);
+    const inventory = await Inventory.findById(req.params.id);
+    
     if (!inventory) {
       return res.status(404).json({ message: 'Inventory item not found' });
     }
     
+    // Check permission (only admin or section manager can delete)
+    if (req.user.role !== 'admin' && req.user.role !== 'section_manager') {
+      return res.status(403).json({ message: 'You do not have permission to delete items' });
+    }
+    
+    if (req.user.role !== 'admin' && req.user.sectionId !== inventory.sectionId.toString()) {
+      return res.status(403).json({ message: 'You can only delete items in your assigned section' });
+    }
+    
+    await Inventory.findByIdAndDelete(req.params.id);
     res.json({ message: 'Inventory item deleted successfully' });
   } catch (error: any) {
+    console.error('Delete inventory error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// Get inventory statistics
-export const getInventoryStats = async (req: Request, res: Response) => {
+// Get inventory stats
+export const getInventoryStats = async (req: any, res: Response) => {
   try {
-    const totalItems = await Inventory.countDocuments();
+    let query = {};
+    
+    if (req.user.role !== 'admin') {
+      query = { sectionId: req.user.sectionId };
+    } else if (req.query.sectionId) {
+      query = { sectionId: req.query.sectionId };
+    }
+    
+    const totalItems = await Inventory.countDocuments(query);
     const totalQuantity = await Inventory.aggregate([
+      { $match: query },
       { $group: { _id: null, total: { $sum: '$quantity' } } }
     ]);
     
-    const lowStockItems = await Inventory.countDocuments({ status: 'low-stock' });
-    const outOfStockItems = await Inventory.countDocuments({ status: 'out-of-stock' });
+    const lowStockItems = await Inventory.countDocuments({ ...query, status: 'low-stock' });
+    const outOfStockItems = await Inventory.countDocuments({ ...query, status: 'out-of-stock' });
     
     const categoriesCount = await Inventory.aggregate([
+      { $match: query },
       { $group: { _id: '$category', count: { $sum: 1 } } }
     ]);
     
@@ -191,16 +224,24 @@ export const getInventoryStats = async (req: Request, res: Response) => {
       categoriesCount: categoriesMap
     });
   } catch (error: any) {
+    console.error('Get stats error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
 // Get low stock items
-export const getLowStockItems = async (req: Request, res: Response) => {
+export const getLowStockItems = async (req: any, res: Response) => {
   try {
-    const items = await Inventory.find({ status: 'low-stock' }).populate('sectionId', 'name code');
+    let query: any = { status: 'low-stock' };
+    
+    if (req.user.role !== 'admin') {
+      query.sectionId = req.user.sectionId;
+    }
+    
+    const items = await Inventory.find(query).populate('sectionId', 'name code');
     res.json(items);
   } catch (error: any) {
+    console.error('Get low stock error:', error);
     res.status(500).json({ message: error.message });
   }
 };

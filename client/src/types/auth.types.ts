@@ -3,26 +3,18 @@ export interface User {
   username: string;
   email: string;
   fullName: string;
-  role: 'admin' | 'manager' | 'viewer';
+  role: 'admin' | 'section_manager' | 'viewer';
+  sectionId?: {
+    _id: string;
+    name: string;
+    code: string;
+  };
+  sectionName?: string;
   department: string;
   phoneNumber: string;
   isActive: boolean;
   profilePicture?: string;
   lastLogin?: string;
-}
-
-export interface LoginRequest {
-  email: string;
-}
-
-export interface LoginWithPasswordRequest {
-  email: string;
-  password: string;
-}
-
-export interface VerifyOTPRequest {
-  email: string;
-  otp: string;
 }
 
 export interface RegisterRequest {
@@ -31,17 +23,7 @@ export interface RegisterRequest {
   password: string;
   fullName: string;
   role?: string;
+  sectionId?: string;
   department: string;
   phoneNumber: string;
-}
-
-export interface ChangePasswordRequest {
-  currentPassword: string;
-  newPassword: string;
-}
-
-export interface AuthResponse {
-  message: string;
-  token?: string;
-  user?: User;
 }

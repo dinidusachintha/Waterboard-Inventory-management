@@ -6,7 +6,8 @@ export interface IUser extends Document {
   email: string;
   password: string;
   fullName: string;
-  role: 'admin' | 'manager' | 'viewer';
+  role: 'admin' | 'section_manager' | 'viewer';
+  sectionId?: mongoose.Types.ObjectId;
   department: string;
   phoneNumber: string;
   isActive: boolean;
@@ -25,7 +26,12 @@ const UserSchema: Schema = new Schema({
   email: { type: String, required: true, unique: true, lowercase: true },
   password: { type: String, required: true },
   fullName: { type: String, required: true },
-  role: { type: String, enum: ['admin', 'manager', 'viewer'], default: 'viewer' },
+  role: { 
+    type: String, 
+    enum: ['admin', 'section_manager', 'viewer'], 
+    default: 'viewer' 
+  },
+  sectionId: { type: Schema.Types.ObjectId, ref: 'Section' },
   department: { type: String, required: true },
   phoneNumber: { type: String, required: true },
   isActive: { type: Boolean, default: true },
