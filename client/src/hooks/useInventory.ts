@@ -6,7 +6,11 @@ import toast from 'react-hot-toast';
 export const useInventory = (filters?: InventoryFilters) => {
   return useQuery({
     queryKey: ['inventory', filters],
-    queryFn: () => inventoryService.getAll(filters),
+    queryFn: async () => {
+      const response = await inventoryService.getAll(filters);
+      // Handle both array and paginated responses
+      return response.items || response;
+    },
   });
 };
 

@@ -2,11 +2,12 @@ import React from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { X } from 'lucide-react';
+import { X, Save, Plus, Trash2 } from 'lucide-react';
 import { InventoryFormData, Inventory } from '@/types/inventory.types';
 import { useCreateInventory, useUpdateInventory } from '@/hooks/useInventory';
 import { useSections } from '@/hooks/useSections';
 import { ITEM_CATEGORIES, UNITS } from '@/utils/constants';
+import toast from 'react-hot-toast';
 
 const inventorySchema = z.object({
   itemCode: z.string().min(1, 'Item code is required'),
@@ -30,59 +31,119 @@ interface InventoryFormProps {
 }
 
 const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) => {
-  const { data: sections } = useSections();
+  const { data: sections, isLoading: sectionsLoading } = useSections();
   const createMutation = useCreateInventory();
   const updateMutation = useUpdateInventory();
 
-  const { register, handleSubmit, formState: { errors } } = useForm<InventoryFormData>({
+  const { register, handleSubmit, formState: { errors }, watch, setValue } = useForm<InventoryFormData>({
     resolver: zodResolver(inventorySchema),
     defaultValues: editingItem || {
       quantity: 0,
       minimumStock: 0,
       maximumStock: 0,
+      purchaseDate: new Date().toISOString().split('T')[0],
     },
   });
 
+  const quantity = watch('quantity');
+  const minimumStock = watch('minimumStock');
+
+  const getStockStatus = () => {
+    if (quantity <= 0) return { text: 'Out of Stock', color: 'text-red-600', bg: 'bg-red-50' };
+    if (quantity <= minimumStock) return { text: 'Low Stock', color: 'text-yellow-600', bg: 'bg-yellow-50' };
+    return { text: 'In Stock', color: 'text-green-600', bg: 'bg-green-50' };
+  };
+
+  const status = getStockStatus();
+
   const onSubmit = async (data: InventoryFormData) => {
-    if (editingItem) {
-      await updateMutation.mutateAsync({ id: editingItem._id, data });
-    } else {
-      await createMutation.mutateAsync(data);
+    try {
+      if (editingItem) {
+        await updateMutation.mutateAsync({ id: editingItem._id, data });
+        toast.success('Inventory item updated successfully');
+      } else {
+        await createMutation.mutateAsync(data);
+        toast.success('Inventory item created successfully');
+      }
+      onClose();
+    } catch (error) {
+      console.error('Form submission error:', error);
     }
-    onClose();
+  };
+
+  const generateItemCode = () => {
+    const prefix = 'ITEM';
+    const timestamp = Date.now().toString().slice(-6);
+    const random = Math.floor(Math.random() * 1000);
+    const code = `${prefix}-${timestamp}-${random}`;
+    setValue('itemCode', code);
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center p-6 border-b">
-          <h2 className="text-xl font-semibold">
-            {editingItem ? 'Edit Inventory Item' : 'Add New Inventory Item'}
-          </h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black bg-opacity-50">
+      <div className="bg-white rounded-lg w-full max-w-4xl my-8 max-h-[90vh] overflow-y-auto">
+        <div className="sticky top-0 z-10 flex items-center justify-between p-6 bg-white border-b">
+          <div>
+            <h2 className="text-2xl font-semibold text-gray-800">
+              {editingItem ? 'Edit Inventory Item' : 'Add New Inventory Item'}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Fill in the details below to {editingItem ? 'update' : 'create'} an inventory item
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 transition-colors hover:text-gray-600">
             <X size={24} />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="p-6">
+          {/* Stock Status Indicator */}
+          <div className={`${status.bg} p-4 rounded-lg mb-6`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">Current Stock Status</p>
+                <p className={`text-lg font-bold ${status.color}`}>{status.text}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm text-gray-600">Current Quantity: {quantity || 0}</p>
+                <p className="text-sm text-gray-600">Minimum Stock: {minimumStock || 0}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            {/* Basic Information */}
+            <div className="md:col-span-2">
+              <h3 className="pb-2 mb-4 text-lg font-semibold text-gray-800 border-b">Basic Information</h3>
+            </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Item Code *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Item Code <span className="text-red-500">*</span>
               </label>
-              <input
-                {...register('itemCode')}
-                className="input-field"
-                placeholder="e.g., ITEM-001"
-              />
+              <div className="flex gap-2">
+                <input
+                  {...register('itemCode')}
+                  className="flex-1 input-field"
+                  placeholder="e.g., ITEM-001"
+                />
+                <button
+                  type="button"
+                  onClick={generateItemCode}
+                  className="px-3 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                  title="Generate Item Code"
+                >
+                  Generate
+                </button>
+              </div>
               {errors.itemCode && (
-                <p className="text-red-500 text-xs mt-1">{errors.itemCode.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.itemCode.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Item Name *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Item Name <span className="text-red-500">*</span>
               </label>
               <input
                 {...register('itemName')}
@@ -90,13 +151,13 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 placeholder="Enter item name"
               />
               {errors.itemName && (
-                <p className="text-red-500 text-xs mt-1">{errors.itemName.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.itemName.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Category <span className="text-red-500">*</span>
               </label>
               <select {...register('category')} className="input-field">
                 <option value="">Select category</option>
@@ -105,15 +166,15 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 ))}
               </select>
               {errors.category && (
-                <p className="text-red-500 text-xs mt-1">{errors.category.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.category.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Section *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Section <span className="text-red-500">*</span>
               </label>
-              <select {...register('sectionId')} className="input-field">
+              <select {...register('sectionId')} className="input-field" disabled={sectionsLoading}>
                 <option value="">Select section</option>
                 {sections?.map((section: any) => (
                   <option key={section._id} value={section._id}>
@@ -122,13 +183,18 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 ))}
               </select>
               {errors.sectionId && (
-                <p className="text-red-500 text-xs mt-1">{errors.sectionId.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.sectionId.message}</p>
               )}
             </div>
 
+            {/* Stock Information */}
+            <div className="md:col-span-2">
+              <h3 className="pb-2 mb-4 text-lg font-semibold text-gray-800 border-b">Stock Information</h3>
+            </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Quantity *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Quantity <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -136,13 +202,13 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 className="input-field"
               />
               {errors.quantity && (
-                <p className="text-red-500 text-xs mt-1">{errors.quantity.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.quantity.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Unit *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Unit <span className="text-red-500">*</span>
               </label>
               <select {...register('unit')} className="input-field">
                 <option value="">Select unit</option>
@@ -151,13 +217,13 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 ))}
               </select>
               {errors.unit && (
-                <p className="text-red-500 text-xs mt-1">{errors.unit.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.unit.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Minimum Stock *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Minimum Stock <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -165,13 +231,13 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 className="input-field"
               />
               {errors.minimumStock && (
-                <p className="text-red-500 text-xs mt-1">{errors.minimumStock.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.minimumStock.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Maximum Stock *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Maximum Stock <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -179,27 +245,32 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 className="input-field"
               />
               {errors.maximumStock && (
-                <p className="text-red-500 text-xs mt-1">{errors.maximumStock.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.maximumStock.message}</p>
               )}
             </div>
 
+            {/* Location & Supplier Information */}
+            <div className="md:col-span-2">
+              <h3 className="pb-2 mb-4 text-lg font-semibold text-gray-800 border-b">Location & Supplier</h3>
+            </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Location *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Location <span className="text-red-500">*</span>
               </label>
               <input
                 {...register('location')}
                 className="input-field"
-                placeholder="Storage location"
+                placeholder="e.g., Warehouse A, Shelf 2"
               />
               {errors.location && (
-                <p className="text-red-500 text-xs mt-1">{errors.location.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.location.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Supplier *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Supplier <span className="text-red-500">*</span>
               </label>
               <input
                 {...register('supplier')}
@@ -207,13 +278,18 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 placeholder="Supplier name"
               />
               {errors.supplier && (
-                <p className="text-red-500 text-xs mt-1">{errors.supplier.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.supplier.message}</p>
               )}
             </div>
 
+            {/* Dates */}
+            <div className="md:col-span-2">
+              <h3 className="pb-2 mb-4 text-lg font-semibold text-gray-800 border-b">Dates</h3>
+            </div>
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Purchase Date *
+              <label className="block mb-2 text-sm font-medium text-gray-700">
+                Purchase Date <span className="text-red-500">*</span>
               </label>
               <input
                 type="date"
@@ -221,12 +297,12 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
                 className="input-field"
               />
               {errors.purchaseDate && (
-                <p className="text-red-500 text-xs mt-1">{errors.purchaseDate.message}</p>
+                <p className="mt-1 text-xs text-red-500">{errors.purchaseDate.message}</p>
               )}
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block mb-2 text-sm font-medium text-gray-700">
                 Expiry Date
               </label>
               <input
@@ -236,25 +312,28 @@ const InventoryForm: React.FC<InventoryFormProps> = ({ onClose, editingItem }) =
               />
             </div>
 
+            {/* Additional Information */}
             <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block mb-2 text-sm font-medium text-gray-700">
                 Notes
               </label>
               <textarea
                 {...register('notes')}
-                rows={3}
+                rows={4}
                 className="input-field"
-                placeholder="Additional notes..."
+                placeholder="Additional notes about this item..."
               />
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t">
+          {/* Form Actions */}
+          <div className="flex justify-end gap-3 pt-6 mt-6 border-t">
             <button type="button" onClick={onClose} className="btn-secondary">
               Cancel
             </button>
-            <button type="submit" className="btn-primary">
-              {editingItem ? 'Update' : 'Create'} Item
+            <button type="submit" className="flex items-center gap-2 btn-primary">
+              <Save size={18} />
+              {editingItem ? 'Update Item' : 'Create Item'}
             </button>
           </div>
         </form>
